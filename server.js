@@ -1,0 +1,23 @@
+require("dotenv").config();
+const express=require("express"),cors=require("cors"),bcrypt=require("bcryptjs"),jwt=require("jsonwebtoken"),DB=require("better-sqlite3");
+const app=express(),db=new DB("potters.db"),secret=process.env.JWT_SECRET||"CHANGE_ME";
+app.use(cors());app.use(express.json());
+db.exec(`CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT,email TEXT UNIQUE,password_hash TEXT,role TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS applications(id INTEGER PRIMARY KEY AUTOINCREMENT,student_name TEXT,guardian_name TEXT,phone TEXT,class_applied TEXT,status TEXT DEFAULT 'pending',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS results(id INTEGER PRIMARY KEY AUTOINCREMENT,student_id INTEGER,term TEXT,session TEXT,subject TEXT,ca1 REAL DEFAULT 0,ca2 REAL DEFAULT 0,exam REAL DEFAULT 0,teacher_remark TEXT);
+CREATE TABLE IF NOT EXISTS announcements(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT,body TEXT,published_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,student_id INTEGER,amount REAL,reference TEXT,status TEXT DEFAULT 'pending',created_at TEXT DEFAULT CURRENT_TIMESTAMP);`);
+if(!db.prepare("SELECT COUNT(*) c FROM users").get().c){const h=bcrypt.hashSync("Potters123!",10);for(const u of [["Demo Student","student@potters.edu","student"],["Demo Parent","parent@potters.edu","parent"],["Demo Teacher","teacher@potters.edu","teacher"],["School Administrator","admin@potters.edu","admin"]])db.prepare("INSERT INTO users(name,email,password_hash,role)VALUES(?,?,?,?)").run(u[0],u[1],h,u[2]);}
+const auth=(req,res,next)=>{try{req.user=jwt.verify((req.headers.authorization||"").replace("Bearer ",""),secret);next()}catch{return res.status(401).json({message:"Authentication required"})}};
+const roles=(...r)=>(req,res,next)=>r.includes(req.user.role)?next():res.status(403).json({message:"Insufficient permission"});
+app.get("/api/health",(q,r)=>r.json({ok:true,service:"The Potters Edu Services API"}));
+app.post("/api/auth/login",(q,r)=>{const{email,password}=q.body||{},u=db.prepare("SELECT * FROM users WHERE email=?").get(email);if(!u||!bcrypt.compareSync(password||"",u.password_hash))return r.status(401).json({message:"Invalid credentials"});r.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},secret,{expiresIn:"7d"}),user:{id:u.id,name:u.name,email:u.email,role:u.role}})});
+app.post("/api/applications",(q,r)=>{const{studentName,guardianName,phone,classApplied}=q.body||{};if(!studentName||!guardianName||!phone||!classApplied)return r.status(400).json({message:"All fields required"});const i=db.prepare("INSERT INTO applications(student_name,guardian_name,phone,class_applied)VALUES(?,?,?,?)").run(studentName,guardianName,phone,classApplied);r.status(201).json({id:i.lastInsertRowid,status:"pending"})});
+app.get("/api/announcements",(q,r)=>r.json(db.prepare("SELECT * FROM announcements ORDER BY published_at DESC").all()));
+app.get("/api/results/me",auth,(q,r)=>r.json(db.prepare("SELECT * FROM results WHERE student_id=?").all(q.user.id)));
+app.get("/api/applications",auth,roles("admin"),(q,r)=>r.json(db.prepare("SELECT * FROM applications ORDER BY created_at DESC").all()));
+app.patch("/api/applications/:id",auth,roles("admin"),(q,r)=>{const{s}=q.body||{};db.prepare("UPDATE applications SET status=? WHERE id=?").run(s,q.params.id);r.json({ok:true})});
+app.post("/api/announcements",auth,roles("admin"),(q,r)=>{const{title,body}=q.body||{};const i=db.prepare("INSERT INTO announcements(title,body)VALUES(?,?)").run(title,body);r.status(201).json({id:i.lastInsertRowid})});
+app.post("/api/payments",auth,(q,r)=>{const{amount,reference}=q.body||{};const i=db.prepare("INSERT INTO payments(student_id,amount,reference)VALUES(?,?,?)").run(q.user.id,amount,reference||null);r.status(201).json({id:i.lastInsertRowid,status:"pending"})});
+app.get("/api/payments/me",auth,(q,r)=>r.json(db.prepare("SELECT * FROM payments WHERE student_id=?").all(q.user.id)));
+app.listen(process.env.PORT||4000,()=>console.log("Potters API running on "+(process.env.PORT||4000)));

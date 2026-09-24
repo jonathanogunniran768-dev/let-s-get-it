@@ -1,0 +1,6 @@
+{
+  "expo":{"name":"The Potters Edu Services","slug":"the-potters-edu-services","version":"1.0.0",
+  "orientation":"portrait","userInterfaceStyle":"light","scheme":"pottersedu",
+  "android":{"package":"com.pottersacademy.edu","versionCode":1},
+  "extra":{"apiUrl":"http://10.0.2.2:4000/api"}}
+}
